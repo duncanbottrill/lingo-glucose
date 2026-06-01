@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lingo Glucose Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    header { text-align: center; margin-bottom: 28px; }
+    header h1 { font-size: 1.6rem; font-weight: 700; color: #fff; }
+    header p  { font-size: 0.85rem; color: #888; margin-top: 4px; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+      max-width: 860px;
+      margin: 0 auto 28px;
+    }
+    .stat {
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+    .stat .label { font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: .05em; }
+    .stat .value { font-size: 1.6rem; font-weight: 700; margin-top: 4px; }
+    .stat .unit  { font-size: 0.75rem; color: #888; }
+
+    .tir-bar {
+      max-width: 860px;
+      margin: 0 auto 28px;
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 12px;
+      padding: 16px 20px;
+    }
+    .tir-bar h3 { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; }
+    .tir-track { display: flex; height: 20px; border-radius: 6px; overflow: hidden; }
+    .tir-segment { height: 100%; transition: width .4s; }
+    .tir-legend { display: flex; gap: 16px; margin-top: 8px; flex-wrap: wrap; }
+    .tir-legend span { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: #aaa; }
+    .tir-legend .dot { width: 10px; height: 10px; border-radius: 50%; }
+
+    /* Controls row: range buttons + day picker */
+    .controls {
+      max-width: 860px;
+      margin: 0 auto 16px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .controls button {
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid #2a2d3a;
+      background: #1a1d27;
+      color: #aaa;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: background .15s, color .15s;
+    }
+    .controls button.active, .controls button:hover {
+      background: #3b82f6;
+      color: #fff;
+      border-color: #3b82f6;
+    }
+    .day-picker {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: auto;
+    }
+    .day-picker select {
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      color: #e0e0e0;
+      border-radius: 20px;
+      padding: 6px 12px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      outline: none;
+    }
+    .day-picker button {
+      padding: 6px 10px;
+      border-radius: 20px;
+      border: 1px solid #2a2d3a;
+      background: #1a1d27;
+      color: #aaa;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+    .day-picker button:hover { background: #2a2d3a; color: #fff; }
+
+    .chart-card {
+      max-width: 860px;
+      margin: 0 auto 24px;
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .chart-card h3 {
+      font-size: 0.8rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      margin-bottom: 14px;
+    }
+
+    /* Spike / drop event list */
+    .events {
+      max-width: 860px;
+      margin: 0 auto 24px;
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .events h3 {
+      font-size: 0.8rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      margin-bottom: 12px;
+    }
+    .event-list { display: flex; flex-direction: column; gap: 8px; }
+    .event-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.83rem;
+    }
+    .event-item.spike { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); }
+    .event-item.drop  { background: rgba(239,68,68,0.1);  border: 1px solid rgba(239,68,68,0.2); }
+    .event-icon { font-size: 1rem; }
+    .event-time { color: #aaa; min-width: 60px; }
+    .event-val  { font-weight: 700; min-width: 70px; }
+    .event-val.spike { color: #f59e0b; }
+    .event-val.drop  { color: #ef4444; }
+    .event-desc { color: #777; font-size: 0.78rem; }
+    .no-events { color: #555; font-size: 0.85rem; }
+
+    #loading {
+      text-align: center;
+      padding: 80px 0;
+      color: #555;
+      font-size: 0.95rem;
+    }
+
+    footer {
+      text-align: center;
+      font-size: 0.75rem;
+      color: #444;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Glucose Dashboard</h1>
+  <p id="date-range">Loading…</p>
+</header>
+
+<div id="loading">Loading glucose data…</div>
+
+<div id="app" style="display:none">
+  <div class="stats">
+    <div class="stat">
+      <div class="label">Average</div>
+      <div class="value" id="stat-avg" style="color:#3b82f6"></div>
+      <div class="unit">mmol/L</div>
+    </div>
+    <div class="stat">
+      <div class="label">Min</div>
+      <div class="value" id="stat-min" style="color:#10b981"></div>
+      <div class="unit">mmol/L</div>
+    </div>
+    <div class="stat">
+      <div class="label">Max</div>
+      <div class="value" id="stat-max" style="color:#f59e0b"></div>
+      <div class="unit">mmol/L</div>
+    </div>
+    <div class="stat">
+      <div class="label">Readings</div>
+      <div class="value" id="stat-count" style="color:#a78bfa"></div>
+      <div class="unit">total</div>
+    </div>
+    <div class="stat">
+      <div class="label">Days</div>
+      <div class="value" id="stat-days" style="color:#f472b6"></div>
+      <div class="unit">tracked</div>
+    </div>
+  </div>
+
+  <div class="tir-bar">
+    <h3>Time in Range (3.9 – 7.8 mmol/L)</h3>
+    <div class="tir-track">
+      <div class="tir-segment" id="tir-low"  style="background:#ef4444"></div>
+      <div class="tir-segment" id="tir-in"   style="background:#10b981"></div>
+      <div class="tir-segment" id="tir-high" style="background:#f59e0b"></div>
+    </div>
+    <div class="tir-legend">
+      <span><span class="dot" style="background:#ef4444"></span> Low &lt;3.9 (<span id="tir-low-pct"></span>%)</span>
+      <span><span class="dot" style="background:#10b981"></span> In range (<span id="tir-in-pct"></span>%)</span>
+      <span><span class="dot" style="background:#f59e0b"></span> High &gt;7.8 (<span id="tir-high-pct"></span>%)</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button data-days="1"  class="range-btn active">Today</button>
+    <button data-days="3"  class="range-btn">3 Days</button>
+    <button data-days="7"  class="range-btn">7 Days</button>
+    <button data-days="14" class="range-btn">14 Days</button>
+    <button data-days="0"  class="range-btn">All</button>
+
+    <div class="day-picker" id="day-picker" style="display:none">
+      <button id="prev-day">&#8592;</button>
+      <select id="day-select"></select>
+      <button id="next-day">&#8594;</button>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <h3>Glucose Over Time</h3>
+    <canvas id="lineChart"></canvas>
+  </div>
+
+  <div class="events" id="events-panel">
+    <h3>Spikes &amp; Drops</h3>
+    <div class="event-list" id="event-list"></div>
+  </div>
+
+  <div class="chart-card">
+    <h3>Daily Average</h3>
+    <canvas id="barChart"></canvas>
+  </div>
+</div>
+
+<footer>Data from Lingo CGM · mmol/L</footer>
+
+<script>
+let allReadings = [];
+let lineChart, barChart;
+let currentMode = 'range'; // 'range' | 'day'
+let currentDays = 1;
+let currentDayIndex = 0;
+let availableDays = []; // array of date strings, sorted ascending
+
+// Spike/drop detection thresholds
+const SPIKE_THRESHOLD = 7.8;   // above this = spike
+const DROP_THRESHOLD  = 3.9;   // below this = drop
+// A spike/drop "event" = crossing threshold and staying for ≥2 readings
+function detectEvents(data) {
+  const events = [];
+  let inSpike = false, inDrop = false;
+  let eventStart = null, peakVal = null, peakTime = null;
+
+  function closeEvent(type, end) {
+    events.push({ type, time: peakTime, value: peakVal, start: eventStart, end });
+  }
+
+  for (let i = 0; i < data.length; i++) {
+    const r = data[i];
+    if (r.v > SPIKE_THRESHOLD) {
+      if (!inSpike) { inSpike = true; eventStart = r.t; peakVal = r.v; peakTime = r.t; }
+      else if (r.v > peakVal) { peakVal = r.v; peakTime = r.t; }
+      if (inDrop) { closeEvent('drop', r.t); inDrop = false; }
+    } else if (r.v < DROP_THRESHOLD) {
+      if (!inDrop) { inDrop = true; eventStart = r.t; peakVal = r.v; peakTime = r.t; }
+      else if (r.v < peakVal) { peakVal = r.v; peakTime = r.t; }
+      if (inSpike) { closeEvent('spike', r.t); inSpike = false; }
+    } else {
+      if (inSpike) { closeEvent('spike', r.t); inSpike = false; }
+      if (inDrop)  { closeEvent('drop',  r.t); inDrop  = false; }
+    }
+  }
+  if (inSpike) closeEvent('spike', data[data.length-1].t);
+  if (inDrop)  closeEvent('drop',  data[data.length-1].t);
+  return events;
+}
+
+Papa.parse('data/glucose.csv', {
+  download: true,
+  skipEmptyLines: true,
+  complete(results) {
+    allReadings = results.data.slice(1).map(row => {
+      return { t: new Date(row[0]), v: parseFloat(row[1]) };
+    }).filter(r => !isNaN(r.t) && !isNaN(r.v))
+      .sort((a, b) => a.t - b.t);
+
+    // Build list of unique days
+    const daySet = new Set(allReadings.map(r => r.t.toLocaleDateString('en-CA')));
+    availableDays = [...daySet].sort();
+    currentDayIndex = availableDays.length - 1;
+
+    // Populate day select
+    const sel = document.getElementById('day-select');
+    availableDays.forEach((d, i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = new Date(d + 'T12:00').toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
+      sel.appendChild(opt);
+    });
+    sel.value = currentDayIndex;
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('app').style.display = '';
+
+    renderAll();
+
+    // Range buttons
+    document.querySelectorAll('.range-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentMode = 'range';
+        currentDays = parseInt(btn.dataset.days);
+        document.getElementById('day-picker').style.display = 'none';
+        renderAll();
+      });
+    });
+
+    // "Pick a day" — clicking Today when already on range=1 toggles day picker
+    // Add a dedicated "Pick Day" button
+    const pickBtn = document.createElement('button');
+    pickBtn.textContent = 'Pick Day';
+    pickBtn.className = 'range-btn';
+    pickBtn.addEventListener('click', () => {
+      document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+      pickBtn.classList.add('active');
+      currentMode = 'day';
+      document.getElementById('day-picker').style.display = 'flex';
+      renderAll();
+    });
+    document.querySelector('.controls').insertBefore(pickBtn, document.getElementById('day-picker'));
+
+    sel.addEventListener('change', () => {
+      currentDayIndex = parseInt(sel.value);
+      renderAll();
+    });
+    document.getElementById('prev-day').addEventListener('click', () => {
+      if (currentDayIndex > 0) { currentDayIndex--; sel.value = currentDayIndex; renderAll(); }
+    });
+    document.getElementById('next-day').addEventListener('click', () => {
+      if (currentDayIndex < availableDays.length - 1) { currentDayIndex++; sel.value = currentDayIndex; renderAll(); }
+    });
+  }
+});
+
+function getDisplayData() {
+  if (currentMode === 'day') {
+    const dayStr = availableDays[currentDayIndex];
+    return allReadings.filter(r => r.t.toLocaleDateString('en-CA') === dayStr);
+  }
+  if (!currentDays) return allReadings;
+  const cutoff = new Date(allReadings[allReadings.length - 1].t);
+  cutoff.setDate(cutoff.getDate() - currentDays);
+  return allReadings.filter(r => r.t >= cutoff);
+}
+
+function renderAll() {
+  const data = getDisplayData();
+  renderStats(data);
+  renderTIR(data);
+  renderLine(data);
+  renderEvents(data);
+  renderBar(data);
+}
+
+function renderStats(data) {
+  if (!data.length) return;
+  const vals = data.map(r => r.v);
+  const avg = vals.reduce((a,b) => a+b, 0) / vals.length;
+  document.getElementById('stat-avg').textContent = avg.toFixed(1);
+  document.getElementById('stat-min').textContent = Math.min(...vals).toFixed(1);
+  document.getElementById('stat-max').textContent = Math.max(...vals).toFixed(1);
+  document.getElementById('stat-count').textContent = vals.length.toLocaleString();
+  const days = new Set(data.map(r => r.t.toDateString())).size;
+  document.getElementById('stat-days').textContent = days;
+
+  const first = data[0].t, last = data[data.length-1].t;
+  document.getElementById('date-range').textContent =
+    first.toLocaleDateString(undefined, {month:'short',day:'numeric',year:'numeric'}) + ' – ' +
+    last.toLocaleDateString(undefined, {month:'short',day:'numeric',year:'numeric'});
+}
+
+function renderTIR(data) {
+  const low  = data.filter(r => r.v < 3.9).length;
+  const high = data.filter(r => r.v > 7.8).length;
+  const inR  = data.length - low - high;
+  const pct  = v => ((v / data.length) * 100).toFixed(1);
+  document.getElementById('tir-low').style.width  = pct(low)  + '%';
+  document.getElementById('tir-in').style.width   = pct(inR)  + '%';
+  document.getElementById('tir-high').style.width = pct(high) + '%';
+  document.getElementById('tir-low-pct').textContent  = pct(low);
+  document.getElementById('tir-in-pct').textContent   = pct(inR);
+  document.getElementById('tir-high-pct').textContent = pct(high);
+}
+
+function renderEvents(data) {
+  const events = detectEvents(data);
+  const list = document.getElementById('event-list');
+  list.innerHTML = '';
+
+  if (!events.length) {
+    list.innerHTML = '<span class="no-events">No spikes or drops detected in this period.</span>';
+    return;
+  }
+
+  events.slice().reverse().forEach(ev => {
+    const el = document.createElement('div');
+    el.className = 'event-item ' + ev.type;
+    const time = ev.time.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    const date = ev.time.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const desc = ev.type === 'spike'
+      ? `peaked at ${ev.value.toFixed(1)} mmol/L — above 7.8 target`
+      : `dropped to ${ev.value.toFixed(1)} mmol/L — below 3.9 threshold`;
+    el.innerHTML = `
+      <span class="event-icon">${ev.type === 'spike' ? '📈' : '📉'}</span>
+      <span class="event-time">${date} ${time}</span>
+      <span class="event-val ${ev.type}">${ev.value.toFixed(1)} mmol/L</span>
+      <span class="event-desc">${desc}</span>
+    `;
+    list.appendChild(el);
+  });
+}
+
+function renderLine(data) {
+  const events = detectEvents(data);
+
+  // Build point-level color array and radius for spikes/drops
+  const pointColors = data.map(r => {
+    if (r.v > SPIKE_THRESHOLD) return '#f59e0b';
+    if (r.v < DROP_THRESHOLD)  return '#ef4444';
+    return 'transparent';
+  });
+  const pointRadius = data.map(r =>
+    (r.v > SPIKE_THRESHOLD || r.v < DROP_THRESHOLD) ? 3 : 0
+  );
+
+  // Annotation lines for each event peak
+  const annotations = {};
+  events.forEach((ev, i) => {
+    annotations['event' + i] = {
+      type: 'line',
+      xMin: ev.time,
+      xMax: ev.time,
+      borderColor: ev.type === 'spike' ? 'rgba(245,158,11,0.5)' : 'rgba(239,68,68,0.5)',
+      borderWidth: 1,
+      borderDash: [4, 3],
+      label: {
+        display: true,
+        content: ev.value.toFixed(1),
+        position: 'start',
+        backgroundColor: ev.type === 'spike' ? '#f59e0b' : '#ef4444',
+        color: '#000',
+        font: { size: 10, weight: 'bold' },
+        padding: { x: 4, y: 2 },
+        borderRadius: 4
+      }
+    };
+  });
+
+  if (lineChart) lineChart.destroy();
+  lineChart = new Chart(document.getElementById('lineChart'), {
+    type: 'line',
+    data: {
+      datasets: [
+        {
+          data: data.map(r => ({ x: r.t, y: r.v })),
+          borderColor: '#3b82f6',
+          borderWidth: 1.5,
+          pointBackgroundColor: pointColors,
+          pointBorderColor: pointColors,
+          pointRadius: pointRadius,
+          pointHoverRadius: 5,
+          tension: 0.3,
+          fill: { target: 'origin', above: 'rgba(59,130,246,0.08)' }
+        }
+      ]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              const tag = v > SPIKE_THRESHOLD ? ' ▲ spike' : v < DROP_THRESHOLD ? ' ▼ drop' : '';
+              return v.toFixed(1) + ' mmol/L' + tag;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'time',
+          time: { tooltipFormat: 'MMM d, HH:mm' },
+          grid: { color: '#1e2130' },
+          ticks: { color: '#666', maxTicksLimit: 8 }
+        },
+        y: {
+          min: 2,
+          grid: { color: '#1e2130' },
+          ticks: { color: '#666', callback: v => v + ' mmol/L' }
+        }
+      }
+    },
+    plugins: [{
+      id: 'bands',
+      beforeDraw(chart) {
+        const { ctx, chartArea: a, scales: { y } } = chart;
+        const inLow  = y.getPixelForValue(3.9);
+        const inHigh = y.getPixelForValue(7.8);
+        ctx.save();
+        // green target band
+        ctx.fillStyle = 'rgba(16,185,129,0.06)';
+        ctx.fillRect(a.left, inHigh, a.width, inLow - inHigh);
+        // red zone below 3.9
+        ctx.fillStyle = 'rgba(239,68,68,0.05)';
+        ctx.fillRect(a.left, inLow, a.width, a.bottom - inLow);
+        // amber zone above 7.8
+        ctx.fillStyle = 'rgba(245,158,11,0.05)';
+        ctx.fillRect(a.left, a.top, a.width, inHigh - a.top);
+        // threshold lines
+        ctx.strokeStyle = 'rgba(239,68,68,0.3)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4,4]);
+        ctx.beginPath(); ctx.moveTo(a.left, inLow); ctx.lineTo(a.right, inLow); ctx.stroke();
+        ctx.strokeStyle = 'rgba(245,158,11,0.3)';
+        ctx.beginPath(); ctx.moveTo(a.left, inHigh); ctx.lineTo(a.right, inHigh); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+    }, {
+      id: 'eventMarkers',
+      afterDatasetsDraw(chart) {
+        const { ctx, scales: { x, y } } = chart;
+        const events = detectEvents(data);
+        events.forEach(ev => {
+          const px = x.getPixelForValue(ev.time);
+          const py = y.getPixelForValue(ev.value);
+          const isSpike = ev.type === 'spike';
+          const color = isSpike ? '#f59e0b' : '#ef4444';
+          // Vertical dashed line at peak
+          ctx.save();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.globalAlpha = 0.4;
+          ctx.beginPath();
+          ctx.moveTo(px, chart.chartArea.top);
+          ctx.lineTo(px, chart.chartArea.bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+          // Label pill
+          const label = ev.value.toFixed(1);
+          ctx.font = 'bold 10px sans-serif';
+          const tw = ctx.measureText(label).width;
+          const ph = 16, pw = tw + 8, pr = 4;
+          const lx = px - pw / 2;
+          const ly = isSpike ? py - ph - 6 : py + 6;
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.roundRect(lx, ly, pw, ph, pr);
+          ctx.fill();
+          ctx.fillStyle = '#000';
+          ctx.fillText(label, lx + 4, ly + 11);
+          ctx.restore();
+        });
+      }
+    }]
+  });
+}
+
+function renderBar(data) {
+  const byDay = {};
+  data.forEach(r => {
+    const key = r.t.toLocaleDateString(undefined, { month:'short', day:'numeric' });
+    if (!byDay[key]) byDay[key] = [];
+    byDay[key].push(r.v);
+  });
+  const labels = Object.keys(byDay);
+  const avgs   = labels.map(k => (byDay[k].reduce((a,b)=>a+b,0)/byDay[k].length).toFixed(2));
+
+  if (barChart) barChart.destroy();
+  barChart = new Chart(document.getElementById('barChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: avgs,
+        backgroundColor: avgs.map(v =>
+          v < 3.9 ? '#ef4444' : v > 7.8 ? '#f59e0b' : '#10b981'
+        ),
+        borderRadius: 4
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      plugins: { legend: { display: false }, tooltip: {
+        callbacks: { label: ctx => ctx.parsed.y + ' mmol/L avg' }
+      }},
+      scales: {
+        x: { grid: { color: '#1e2130' }, ticks: { color: '#666' } },
+        y: {
+          min: 3,
+          grid: { color: '#1e2130' },
+          ticks: { color: '#666', callback: v => v + ' mmol/L' }
+        }
+      }
+    }
+  });
+}
+</script>
+</body>
+</html>
