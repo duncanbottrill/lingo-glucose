@@ -343,6 +343,15 @@ function loadEvents() {
 function saveEvents(evs) {
   localStorage.setItem('lingo-events', JSON.stringify(evs));
 }
+function loadDismissed() {
+  try { return new Set(JSON.parse(localStorage.getItem('lingo-dismissed') || '[]')); } catch { return new Set(); }
+}
+function dismissAutoMeal(isoTime) {
+  const d = loadDismissed();
+  d.add(isoTime);
+  localStorage.setItem('lingo-dismissed', JSON.stringify([...d]));
+  renderAll();
+}
 
 // ─── Auto meal detection ──────────────────────────────────────────────────────
 function detectMeals(data) {
@@ -522,7 +531,8 @@ function eventsInWindow(data) {
   const manual = loadEvents().filter(e => {
     const et = new Date(e.t); return et >= start && et <= end;
   });
-  const auto = detectMeals(data);
+  const dismissed = loadDismissed();
+  const auto = detectMeals(data).filter(e => !dismissed.has(e.t));
   return { manual, auto };
 }
 
@@ -607,7 +617,9 @@ function renderEventList(data) {
       ? `<span class="ev-type auto">auto +${ev.rise} mmol/L</span>`
       : `<span class="ev-type ${ev.type}">${ev.type}</span>`;
     const label = ev.label || (ev._auto ? 'Likely meal' : ev.type);
-    const del = ev._auto ? '' : `<button class="ev-delete" data-idx="${ev._idx}">✕</button>`;
+    const del = ev._auto
+      ? `<button class="ev-delete ev-dismiss" data-t="${ev.t}" title="Remove auto-detection">✕</button>`
+      : `<button class="ev-delete" data-idx="${ev._idx}">✕</button>`;
     row.innerHTML = `
       <span class="ev-icon">${ev._auto ? '🤖' : ICONS[ev.type]}</span>
       <span class="ev-time">${timeStr}</span>
@@ -618,7 +630,13 @@ function renderEventList(data) {
   });
 
   list.querySelectorAll('.ev-delete').forEach(btn => {
-    btn.addEventListener('click', () => deleteEvent(parseInt(btn.dataset.idx)));
+    btn.addEventListener('click', () => {
+      if (btn.classList.contains('ev-dismiss')) {
+        dismissAutoMeal(btn.dataset.t);
+      } else {
+        deleteEvent(parseInt(btn.dataset.idx));
+      }
+    });
   });
 }
 
